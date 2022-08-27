@@ -1,0 +1,220 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >
+    Udacity Project 2: Deploy a high-availability web app using CloudFormation:
+    Server infrastructure
+
+Parameters: 
+  # Paramenters used to make cloudformation templates more reusable
+  # Aspects that change over time therefore made into parameters:
+  # - Environment
+  # - Amazon Machine Image (AMI)
+
+  # String Parameters
+  ## Environment
+  EnvironmentName:
+      Description: An environment name that will be prefixed to various resources in this project
+      Type: 'AWS::SSM::Parameter::Value<String>'
+      Default: EnvironmentName
+
+  ## AMI
+  VirtualServerImageId:
+      Description: Virtual Server (EC2 Instance) Amazon Machine Image ID
+      Type: 'AWS::SSM::Parameter::Value<String>'   
+      Default: VirtualServerImageId
+
+Resources: 
+    # Identity and Access Management (IAM) 
+    # Role & Instance Profile
+    ## IAM Role for EC2 Instances
+    ### that need full access to S3 buckets
+    ### https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_terms-and-concepts.html
+    EC2InstanceIAMRoleFullAccessS3Bucket:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument: 
+          Version: "2012-10-17"
+          Statement: 
+            - Effect: "Allow"
+              Principal: 
+                Service: 
+                  - "ec2.amazonaws.com"
+              Action: 
+                - "sts:AssumeRole"
+        ManagedPolicyArns:
+            - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+    ## Instance profile
+    ### Passess IAM role above to EC2 instance
+    ### https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-ec2_instance-profiles.html
+    EC2InstanceIAMProfile: 
+      Type: AWS::IAM::InstanceProfile
+      DependsOn: EC2InstanceIAMRoleFullAccessS3Bucket
+      Description: Instance Profile :Since you will be downloading the application archive from an S3 Bucket, you'll need to create an IAM Role that allows your instances to use the S3 Service.
+      Properties: 
+          Path: /
+          Roles: 
+          - !Ref  EC2InstanceIAMRoleFullAccessS3Bucket
+
+    # Security groups
+    ## Load Balancer security group
+    LoadBalancerSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: The load balancer should allow all public traffic (0.0.0.0/0) on port 80 inbound, which is the default HTTP port. Outbound, it will only be using port 80 to reach the internal servers.
+            VpcId:
+              Fn::ImportValue:
+                !Sub "${EnvironmentName}-VPC"
+            # Inbound rules
+            SecurityGroupIngress:
+            ## Allow all public trafic on port 80 inbound
+            - IpProtocol: tcp
+              FromPort: 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+            # Outbound rules
+            SecurityGroupEgress:
+            ## Only use port 80 to reach the internal server
+            - IpProtocol: tcp
+              FromPort: 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+
+    ## EC2 Instance security group
+    ## While your instances are in public subnets, 
+    ## you'll also need the SSH port open (port 22) for your access, 
+    ## in case you need to troubleshoot your instances.
+    EC2InstanceSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+          GroupDescription: HTTP access on port 80 and port 22
+          VpcId:
+            Fn::ImportValue:
+              !Sub "${EnvironmentName}-VPC"
+          # Inbound rules
+          SecurityGroupIngress:
+          ## Allow all public traffic on default HTTP port (80)
+          - IpProtocol: tcp
+            FromPort: 80
+            ToPort: 80
+            CidrIp: 0.0.0.0/0
+          ## Allow SSH port (22) open when troubleshooting
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: 0.0.0.0/0
+          # Outbound rules
+          SecurityGroupEgress:
+          - IpProtocol: tcp
+            FromPort: 0
+            ToPort: 65535 # Ephemeral port 
+            CidrIp: 0.0.0.0/0
+
+    # Launch Template
+    # Specify instance configuration information
+    # https://docs.aws.amazon.com/autoscaling/ec2/userguide/launch-templates.html 
+    EC2InstanceLaunchTemplate:
+      Type: AWS::EC2::LaunchTemplate
+      DependsOn: EC2InstanceSecurityGroup
+      Properties: 
+        # Shouldn't be a 'keyname' property in the launch config (template)
+        LaunchTemplateData:
+          # Working test
+          UserData:
+            Fn::Base64: !Sub |
+              #!/bin/bash
+              apt-get update -y
+              apt-get install apache2 -y
+              systemctl start apache2.service
+              cd /var/www/html
+              echo "<h3>it works! Udagram, Udacity</h3>" > index.html
+              echo "<i><a href="https://www.alx-t.com">ALX-T</a> <a href="https://www.udacity.com/course/cloud-dev-ops-nanodegree--nd9991">Udacity</a> Project 2: Deploy a high-availability web app using CloudFormation</i>"  >> index.html
+          ImageId: !Ref VirtualServerImageId
+          SecurityGroupIds:
+            - Ref: EC2InstanceSecurityGroup
+          # Machine Specs
+          ## Machine should have
+          InstanceType: t3.small # t3.small or better
+          BlockDeviceMappings:
+          - DeviceName: "/dev/sdk"
+            Ebs:
+              VolumeSize: '10' # 10GB or more disk space
+              
+    # High Availability
+    ## Elastic Load Balancing
+    ### Target group
+    ElasticLoadBalancerTargetGroup:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties:
+          HealthCheckIntervalSeconds: 35
+          HealthCheckPath: /
+          HealthCheckProtocol: HTTP
+          HealthCheckTimeoutSeconds: 10
+          HealthyThresholdCount: 2
+          Port: 80 # Port 80 used in health checks associated with load balancer
+          Protocol: HTTP
+          UnhealthyThresholdCount: 6
+          VpcId: 
+            Fn::ImportValue:
+              Fn::Sub: "${EnvironmentName}-VPC"
+
+    ### Load Balancer
+    UdagramLoadBalancer:
+        Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+        Properties:
+          Subnets:
+          - Fn::ImportValue: !Sub "${EnvironmentName}-PubSubnet1"
+          - Fn::ImportValue: !Sub "${EnvironmentName}-PubSubnet2"
+          SecurityGroups:
+          - Ref: LoadBalancerSecurityGroup
+
+    ### Listener
+    LoadBalancerListener:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        Properties:
+          DefaultActions:
+          - Type: forward
+            TargetGroupArn:
+              Ref: ElasticLoadBalancerTargetGroup
+          LoadBalancerArn:
+            Ref: UdagramLoadBalancer
+          Port: '80' # port 80 used in listener associated with load balancer
+          Protocol: HTTP
+
+    ### Listner Rule
+    LoadBalancerListenerRule:
+        Type: AWS::ElasticLoadBalancingV2::ListenerRule
+        Properties:
+          Actions:
+          - Type: forward
+            TargetGroupArn: !Ref 'ElasticLoadBalancerTargetGroup'
+          Conditions:
+          - Field: path-pattern
+            Values: [/]
+          ListenerArn: !Ref 'LoadBalancerListener'
+          Priority: 1
+
+    ## AutoScaling
+    ### Autoscaling group
+    UdagramAutoScalingGroup:
+        Type: AWS::AutoScaling::AutoScalingGroup
+        Properties:
+          VPCZoneIdentifier:
+          - Fn::ImportValue: !Sub "${EnvironmentName}-PrivSubnet1"
+          - Fn::ImportValue: !Sub "${EnvironmentName}-PrivSubnet2"
+          LaunchTemplate:
+            LaunchTemplateId: !Ref EC2InstanceLaunchTemplate
+            Version: !GetAtt EC2InstanceLaunchTemplate.LatestVersionNumber
+          MinSize: '4'
+          MaxSize: '5'
+          TargetGroupARNs:
+          - Ref: ElasticLoadBalancerTargetGroup
+
+Outputs:
+    UdagramLoadBalancer:
+      Description: Udagram load balancer reference
+      Value: !Ref UdagramLoadBalancer
+
+    UdagramLoadBalancerURL:
+      Description: Udagram load balancer working test URL
+      Value: !Join [ "", [ "http://", !GetAtt UdagramLoadBalancer.DNSName ] ]

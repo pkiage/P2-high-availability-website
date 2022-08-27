@@ -1,0 +1,90 @@
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ssm-parameter.html
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+    Udacity Project 2: Deploy a high-availability web app using CloudFormation:
+    AWS Systems Manager Parameter Store string parameters
+
+Resources:
+  EnvironmentName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: EnvironmentName
+      Type: String
+      Value: UdagramProject
+      Description: An environment name that will be prefixed to resources in this project
+  
+  # NETWORK STACK PARAMETERS
+  ## VPC IP Address
+  VPCCidrBlockIPv4:
+    Type: AWS::SSM::Parameter
+    DependsOn: EnvironmentName
+    Properties:
+      Name: VPCCidrBlockIPv4
+      Type: String
+      Value: 10.0.0.0/16
+      Description: Classless Inter-Domain Routing (CIDR) block for the VPC
+      Tags:
+        Environment: !Ref EnvironmentName
+  
+  ## Public Subnet IP Address
+  ### Public Subnet 1
+  PubSubnet1CidrBlockIPv4:
+    Type: AWS::SSM::Parameter
+    DependsOn: EnvironmentName
+    Properties:
+      Name: PubSubnet1CidrBlockIPv4
+      Type: String
+      Value: 10.0.1.0/24
+      Description: Classless Inter-Domain Routing (CIDR) block for Public Subnet 1
+      Tags:
+        Environment: !Ref EnvironmentName
+    
+  ### Public Subnet 2
+  PubSubnet2CidrBlockIPv4:
+    Type: AWS::SSM::Parameter
+    DependsOn: EnvironmentName
+    Properties:
+      Name: PubSubnet2CidrBlockIPv4
+      Type: String
+      Value: 10.0.2.0/24
+      Description: Classless Inter-Domain Routing (CIDR) block for Public Subnet 2
+      Tags:
+        Environment: !Ref EnvironmentName
+
+  ## Private Subnet IP Address
+  ### Private Subnet 1
+  PrivSubnet1CidrBlockIPv4:
+    Type: AWS::SSM::Parameter
+    DependsOn: EnvironmentName
+    Properties:
+      Name: PrivSubnet1CidrBlockIPv4
+      Type: String
+      Value: 10.0.3.0/24
+      Description: Classless Inter-Domain Routing (CIDR) block for Private Subnet 1
+      Tags:
+        Environment: !Ref EnvironmentName
+    
+  ### Private Subnet 2
+  PrivSubnet2CidrBlockIPv4:
+    Type: AWS::SSM::Parameter
+    DependsOn: EnvironmentName
+    Properties:
+      Name: PrivSubnet2CidrBlockIPv4
+      Type: String
+      Value: 10.0.4.0/24
+      Description: Classless Inter-Domain Routing (CIDR) block for Private Subnet 2
+      Tags:
+        Environment: !Ref EnvironmentName
+  
+  # SERVER STACK PARAMETERS
+  # Virtual Server (EC2 Instance) Amazon Machine Image ID
+  VirtualServerImageId:
+    Type: AWS::SSM::Parameter
+    DependsOn: EnvironmentName
+    Properties:
+      Name: VirtualServerImageId
+      Type: String
+      Value: ami-0b152cfd354c4c7a4
+      Description: Virtual server (EC2 instance) image ID
+      Tags:
+        Environment: !Ref EnvironmentName

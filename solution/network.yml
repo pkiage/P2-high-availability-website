@@ -1,0 +1,276 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+    Udacity Project 2: Deploy a high-availability web app using CloudFormation:
+    Network infrastructure
+
+Parameters: 
+    # Paramenters used to make cloudformation templates more reusable
+    # Aspects that change over time therefore made into parameters:
+    # - Environment
+    # - VPCs 
+    # - Subnets
+
+    # String Parameters
+    ## Environment
+    EnvironmentName:
+        Description: An environment name that will be prefixed to various resources in this project
+        Type: 'AWS::SSM::Parameter::Value<String>'
+        Default: EnvironmentName
+    
+    ## VPC
+    VPCCidrBlockIPv4: 
+        Description: Classless Inter-Domain Routing (CIDR) block for the VPC
+        Type: 'AWS::SSM::Parameter::Value<String>'
+        Default: VPCCidrBlockIPv4
+
+    ## Public Subnets
+    PubSubnet1CidrBlockIPv4: 
+        Description: Classless Inter-Domain Routing (CIDR) block for Public Subnet 1
+        Type: 'AWS::SSM::Parameter::Value<String>'
+        Default: PubSubnet1CidrBlockIPv4
+
+    PubSubnet2CidrBlockIPv4: 
+        Description: Classless Inter-Domain Routing (CIDR) block for Public Subnet 2
+        Type: 'AWS::SSM::Parameter::Value<String>'
+        Default: PubSubnet2CidrBlockIPv4
+
+    ## Private Subnets
+    PrivSubnet1CidrBlockIPv4: 
+        Description: Classless Inter-Domain Routing (CIDR) block for Public Subnet 1
+        Type: 'AWS::SSM::Parameter::Value<String>'
+        Default: PrivSubnet1CidrBlockIPv4
+
+    PrivSubnet2CidrBlockIPv4: 
+        Description: Classless Inter-Domain Routing (CIDR) block for Public Subnet 2
+        Type: 'AWS::SSM::Parameter::Value<String>'
+        Default: PrivSubnet2CidrBlockIPv4
+
+Resources:
+    # VPC
+    UdagramVPC: 
+        Type: AWS::EC2::VPC
+        Properties:
+            CidrBlock: !Ref VPCCidrBlockIPv4
+            EnableDnsHostnames: true
+            Tags: 
+                - Key: Name 
+                  Value: !Ref EnvironmentName
+
+    # IGW & IGW Attachment
+    IGW:
+        Type: AWS::EC2::InternetGateway
+        Properties:
+            Tags:
+                - Key: Name
+                  Value: !Ref EnvironmentName
+    
+    IGWAttachment:
+        Type: AWS::EC2::VPCGatewayAttachment
+        DependsOn: IGW
+        Properties:
+            VpcId: !Ref UdagramVPC
+            InternetGatewayId: !Ref IGW
+
+    # Subnets
+    ## Public Subnets
+    PubSubnet1: 
+        Type: AWS::EC2::Subnet
+        DependsOn: IGWAttachment
+        Properties:
+            VpcId: !Ref UdagramVPC
+            AvailabilityZone: !Select [ 0, !GetAZs '' ]
+            CidrBlock: !Ref PubSubnet1CidrBlockIPv4
+            MapPublicIpOnLaunch: true
+            Tags: 
+                - Key: Name 
+                  Value: !Sub ${EnvironmentName} Public Subnet (AZ1)
+
+    PubSubnet2: 
+        Type: AWS::EC2::Subnet
+        DependsOn: IGWAttachment
+        Properties:
+            VpcId: !Ref UdagramVPC
+            AvailabilityZone: !Select [ 1, !GetAZs '' ]
+            CidrBlock: !Ref PubSubnet2CidrBlockIPv4
+            MapPublicIpOnLaunch: true
+            Tags: 
+                - Key: Name 
+                  Value: !Sub ${EnvironmentName} Public Subnet (AZ2)
+
+    ## Private Subnets
+    PrivSubnet1: 
+        Type: AWS::EC2::Subnet
+        DependsOn: IGWAttachment
+        Properties:
+            VpcId: !Ref UdagramVPC
+            AvailabilityZone: !Select [ 0, !GetAZs '' ]
+            CidrBlock: !Ref PrivSubnet1CidrBlockIPv4
+            MapPublicIpOnLaunch: true
+            Tags: 
+                - Key: Name 
+                  Value: !Sub ${EnvironmentName} Private Subnet (AZ1)
+
+    PrivSubnet2: 
+        Type: AWS::EC2::Subnet
+        DependsOn: IGWAttachment
+        Properties:
+            VpcId: !Ref UdagramVPC
+            AvailabilityZone: !Select [ 1, !GetAZs '' ]
+            CidrBlock: !Ref PrivSubnet2CidrBlockIPv4
+            MapPublicIpOnLaunch: true
+            Tags: 
+                - Key: Name 
+                  Value: !Sub ${EnvironmentName} Private Subnet (AZ2)
+
+    # NAT Gateway & Elastic IPs
+    ## Elastic IPs
+    NATGateway1EIP:
+        Type: AWS::EC2::EIP
+        DependsOn: IGWAttachment
+        Properties: 
+            Domain: vpc
+            Tags:
+                - Key: Name
+                  Value: "Elastic IP for NAT Gateway"
+
+    NATGateway2EIP:
+        Type: AWS::EC2::EIP
+        DependsOn: IGWAttachment
+        Properties:
+            Domain: vpc
+            Tags:
+                - Key: Name
+                  Value: "Elastic IP for NAT Gateway"
+    
+    ## NAT Gateways
+    NATGateway1: 
+        Type: AWS::EC2::NatGateway
+        DependsOn: PubSubnet1
+        Properties: 
+            AllocationId: !GetAtt NATGateway1EIP.AllocationId
+            SubnetId: !Ref PubSubnet1
+            Tags: 
+                - Key: Name 
+                  Value:  "NAT to be used by servers in private subnet"
+
+    NATGateway2: 
+        Type: AWS::EC2::NatGateway
+        DependsOn: PubSubnet2
+        Properties:
+            AllocationId: !GetAtt NATGateway2EIP.AllocationId
+            SubnetId: !Ref PubSubnet1
+            Tags:
+                - Key: Name
+                  Value: "NAT to be used by servers in private subnet"
+
+    # Route Tables, Routes, & Associations
+    ## Route Tables
+    ### Public
+    PubRouteTable:
+        Type: AWS::EC2::RouteTable
+        Properties: 
+            VpcId: !Ref UdagramVPC
+            Tags: 
+                - Key: Name 
+                  Value: !Sub ${EnvironmentName} Public Routes
+
+    ### Private
+    Priv1RouteTable:
+        Type: AWS::EC2::RouteTable
+        Properties: 
+            VpcId: !Ref UdagramVPC
+            Tags: 
+                - Key: Name 
+                  Value: !Sub ${EnvironmentName} Private Routes (AZ1)
+
+    Priv2RouteTable:
+        Type: AWS::EC2::RouteTable
+        Properties: 
+            VpcId: !Ref UdagramVPC
+            Tags: 
+                - Key: Name 
+                  Value: !Sub ${EnvironmentName} Private Routes (AZ2)
+    ## Routes
+    ### Public
+    DefaultPubRoute: 
+        Type: AWS::EC2::Route
+        DependsOn: IGWAttachment
+        Properties: 
+            RouteTableId: !Ref PubRouteTable
+            DestinationCidrBlock: 0.0.0.0/0
+            GatewayId: !Ref IGW
+
+    ### Private
+    DefaultPriv1Route:
+        Type: AWS::EC2::Route
+        Properties:
+            RouteTableId: !Ref Priv1RouteTable
+            DestinationCidrBlock: 0.0.0.0/0
+            NatGatewayId: !Ref NATGateway1
+
+
+    DefaultPriv2Route2:
+        Type: AWS::EC2::Route
+        Properties:
+            RouteTableId: !Ref Priv2RouteTable
+            DestinationCidrBlock: 0.0.0.0/0
+            NatGatewayId: !Ref NATGateway2
+
+    ## Associations
+    ### Public
+    PubSubnet1RouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            RouteTableId: !Ref PubRouteTable
+            SubnetId: !Ref PubSubnet1
+
+    PubSubnet2RouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            RouteTableId: !Ref PubRouteTable
+            SubnetId: !Ref PubSubnet2
+
+    ### Private
+    PrivSubnet1RouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            RouteTableId: !Ref Priv1RouteTable
+            SubnetId: !Ref PrivSubnet1
+
+    PrivSubnet2RouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            RouteTableId: !Ref Priv2RouteTable
+            SubnetId: !Ref PrivSubnet2
+
+Outputs: 
+
+    VPC: 
+        Description: Virtual Private Cloud
+        Value: !Ref UdagramVPC
+        Export:
+          Name: !Sub ${EnvironmentName}-VPC
+
+    PubSubnet1:
+        Description: Public subnet in AZ1
+        Value: !Ref PubSubnet1
+        Export:
+          Name: !Sub ${EnvironmentName}-PubSubnet1
+
+    PubSubnet2: 
+        Description: Public subnet in AZ2
+        Value: !Ref PubSubnet2
+        Export:
+          Name: !Sub ${EnvironmentName}-PubSubnet2
+
+    PrivSubnet1:
+        Description: Private subnet in AZ1
+        Value: !Ref PrivSubnet1
+        Export:
+          Name: !Sub ${EnvironmentName}-PrivSubnet1
+
+    PrivSubnet2: 
+        Description: Private subnet in AZ2
+        Value: !Ref PrivSubnet2
+        Export:
+          Name: !Sub ${EnvironmentName}-PrivSubnet2
